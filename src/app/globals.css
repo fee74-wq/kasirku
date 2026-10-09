@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Plus Jakarta Sans", ui-sans-serif, sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --color-base: #150d06;
+  --color-surface: #1d140a;
+  --color-raised: #271b0f;
+  --color-elevated: #322313;
+  --color-line: #402d1a;
+  --color-ink: #f8f0e5;
+  --color-muted: #b4a18a;
+  --color-chili: #ff5a36;
+  --color-chili-deep: #c2371b;
+  --color-turmeric: #ffc53d;
+  --color-pandan: #45c98a;
+  --color-tamarind: #d98b45;
+  --color-galam: #8b6cf0;
+
+  --radius-card: 18px;
+  --radius-pill: 999px;
+}
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-base);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv01";
+    overscroll-behavior-y: none;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* ambient layered field: warm lamp glow + ember speckle + faint grid */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(120% 70% at 12% -10%, rgba(255, 90, 54, 0.26), transparent 60%),
+      radial-gradient(90% 60% at 100% 8%, rgba(255, 197, 61, 0.16), transparent 62%),
+      radial-gradient(70% 50% at 50% 108%, rgba(139, 108, 240, 0.14), transparent 60%);
+  }
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image: linear-gradient(to right, rgba(255, 220, 170, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 220, 170, 0.05) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: radial-gradient(120% 100% at 50% 0%, #000 20%, transparent 78%);
+  }
+  h1,
+  h2,
+  h3,
+  .display {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.028em;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  input,
+  textarea {
+    caret-color: var(--color-chili);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-turmeric);
+    outline-offset: 2px;
+  }
+  button {
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .tabular {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .press {
+    transition: transform 130ms cubic-bezier(0.3, 0.8, 0.3, 1), box-shadow 160ms ease, background-color 160ms ease, opacity 160ms ease;
+  }
+  .press:active {
+    transform: scale(0.965) translateY(1px);
+  }
+  .grain {
+    position: relative;
+  }
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0.35;
+    background-image: radial-gradient(rgba(255, 235, 210, 0.09) 1px, transparent 1px);
+    background-size: 5px 5px;
+  }
+  .safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .reveal {
+    animation: reveal 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  .pop-in {
+    animation: popIn 280ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+  }
+  .sheet-in {
+    animation: sheetUp 300ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+  }
+  .fade-in {
+    animation: fadeIn 240ms ease both;
+  }
+  .ken {
+    animation: ken 22s ease-in-out infinite alternate;
+  }
+  .ticker {
+    animation: ticker 1.1s ease-in-out infinite;
+  }
+  .shimmer {
+    background: linear-gradient(100deg, transparent 20%, rgba(255, 226, 190, 0.14) 45%, transparent 70%);
+    background-size: 220% 100%;
+    animation: shimmer 2.4s linear infinite;
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes popIn {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes sheetUp {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes ken {
+  from {
+    transform: scale(1.04) translate3d(-1%, 1%, 0);
+  }
+  to {
+    transform: scale(1.16) translate3d(1.5%, -1.5%, 0);
+  }
+}
+@keyframes ticker {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
