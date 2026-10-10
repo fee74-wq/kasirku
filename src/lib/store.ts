@@ -241,7 +241,8 @@ export async function bootstrap() {
         const nextUser = mapUser(me.user);
         const nextBusiness = mapBusiness(me.business);
         if (nextUser && nextBusiness) {
-          if (state.business?.id !== nextBusiness.id) {
+          const activeTenantId = tenantId || state.business?.id;
+          if (activeTenantId && activeTenantId !== nextBusiness.id) {
             // A different workspace logged in on this device — wipe, then pull fresh.
             await idb.clearAllLocal();
             set({ categories: [], products: [], groups: [], transactions: [], cart: [] });
