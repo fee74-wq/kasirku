@@ -110,7 +110,7 @@ export async function pullSync(tenantId: string) {
   const lastPull = (await db.get("meta", metaKey)) || new Date(0).toISOString();
   const now = new Date().toISOString();
 
-  const tables = ["categories", "products", "variant_groups"];
+  const tables = ["categories", "products", "variant_groups", "transactions"];
 
   for (const table of tables) {
     const { data, error } = await supabase
