@@ -149,3 +149,25 @@ export async function syncAll(tenantId: string) {
     console.error("Sync error:", err);
   }
 }
+
+/**
+ * Register event listeners to attempt flushing local changes before user closes the app.
+ */
+export function initAutoSync(tenantId: string) {
+  if (typeof window === "undefined") return;
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      pushSync(tenantId).catch(() => {});
+    }
+  };
+
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("beforeunload", () => {
+    pushSync(tenantId).catch(() => {});
+  });
+
+  return () => {
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
+}
