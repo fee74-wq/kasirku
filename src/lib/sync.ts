@@ -35,68 +35,73 @@ export async function getLocalDB() {
 export async function pushSync(tenantId: string) {
   if (!navigator.onLine) return { success: false, reason: "offline" };
 
-  const db = await getLocalDB();
-  
-  // 1. Push unsynced transactions
-  const txns = await db.getAll("transactions");
-  const unsyncedTxns = txns.filter((t: any) => !t.synced && t.tenant_id === tenantId);
+  try {
+    const db = await getLocalDB();
+    
+    // 1. Push unsynced transactions
+    const txns = await db.getAll("transactions");
+    const unsyncedTxns = txns.filter((t: any) => !t.synced && t.tenant_id === tenantId);
 
-  if (unsyncedTxns.length > 0) {
-    const payload = unsyncedTxns.map((t) => ({
-      id: t.id,
-      tenant_id: t.tenant_id,
-      device_id: t.device_id,
-      items: t.items,
-      item_count: t.item_count,
-      subtotal: t.subtotal,
-      discount: t.discount,
-      total: t.total,
-      payment_method: t.payment_method,
-      cash_received: t.cash_received,
-      change_due: t.change_due,
-      note: t.note,
-      customer_name: t.customer_name,
-      cashier_name: t.cashier_name,
-      created_at: t.created_at,
-    }));
+    if (unsyncedTxns.length > 0) {
+      const payload = unsyncedTxns.map((t) => ({
+        id: t.id,
+        tenant_id: t.tenant_id,
+        device_id: t.device_id,
+        items: t.items,
+        item_count: t.item_count,
+        subtotal: t.subtotal,
+        discount: t.discount,
+        total: t.total,
+        payment_method: t.payment_method,
+        cash_received: t.cash_received,
+        change_due: t.change_due,
+        note: t.note,
+        customer_name: t.customer_name,
+        cashier_name: t.cashier_name,
+        created_at: t.created_at,
+      }));
 
-    const { error } = await supabase.from("transactions").upsert(payload, { onConflict: "id" });
-    if (!error) {
-      const tx = db.transaction("transactions", "readwrite");
-      for (const t of unsyncedTxns) {
-        t.synced = true;
-        await tx.store.put(t);
+      const { error } = await supabase.from("transactions").upsert(payload, { onConflict: "id" });
+      if (!error) {
+        const tx = db.transaction("transactions", "readwrite");
+        for (const t of unsyncedTxns) {
+          t.synced = true;
+          await tx.store.put(t);
+        }
+        await tx.done;
+      } else {
+        console.error("Failed to push transactions:", error);
       }
-      await tx.done;
-    } else {
-      console.error("Failed to push transactions:", error);
     }
+
+    // 2. Push general outbox changes (categories, products, etc.)
+    const outboxItems = await db.getAll("outbox");
+    const tenantOutbox = outboxItems.filter((o: any) => o.tenantId === tenantId);
+
+    for (const item of tenantOutbox) {
+      const { table, op, data } = item;
+      let error = null;
+
+      if (op === "upsert") {
+        const res = await supabase.from(table).upsert({ ...data, tenant_id: tenantId });
+        error = res.error;
+      } else if (op === "delete") {
+        const res = await supabase.from(table).update({ deleted_at: new Date().toISOString() }).eq("id", data.id).eq("tenant_id", tenantId);
+        error = res.error;
+      }
+
+      if (!error) {
+        await db.delete("outbox", item.id);
+      } else {
+        console.error(`Failed to sync outbox item for ${table}:`, error);
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("pushSync error:", err);
+    return { success: false, reason: "network_error" };
   }
-
-  // 2. Push general outbox changes (categories, products, etc.)
-  const outboxItems = await db.getAll("outbox");
-  const tenantOutbox = outboxItems.filter((o: any) => o.tenantId === tenantId);
-
-  for (const item of tenantOutbox) {
-    const { table, op, data } = item;
-    let error = null;
-
-    if (op === "upsert") {
-      const res = await supabase.from(table).upsert({ ...data, tenant_id: tenantId });
-      error = res.error;
-    } else if (op === "delete") {
-      const res = await supabase.from(table).update({ deleted_at: new Date().toISOString() }).eq("id", data.id).eq("tenant_id", tenantId);
-      error = res.error;
-    }
-
-    if (!error) {
-      await db.delete("outbox", item.id);
-    } else {
-      console.error(`Failed to sync outbox item for ${table}:`, error);
-    }
-  }
-
-  return { success: true };
 }
 
 /**
@@ -105,36 +110,41 @@ export async function pushSync(tenantId: string) {
 export async function pullSync(tenantId: string) {
   if (!navigator.onLine) return { success: false, reason: "offline" };
 
-  const db = await getLocalDB();
-  const metaKey = `last_pull_${tenantId}`;
-  const lastPull = (await db.get("meta", metaKey)) || new Date(0).toISOString();
-  const now = new Date().toISOString();
+  try {
+    const db = await getLocalDB();
+    const metaKey = `last_pull_${tenantId}`;
+    const lastPull = (await db.get("meta", metaKey)) || new Date(0).toISOString();
+    const now = new Date().toISOString();
 
-  const tables = ["categories", "products", "variant_groups", "transactions"];
+    const tables = ["categories", "products", "variant_groups", "transactions"];
 
-  for (const table of tables) {
-    const { data, error } = await supabase
-      .from(table)
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .gt("updated_at", lastPull);
+    for (const table of tables) {
+      const { data, error } = await supabase
+        .from(table)
+        .select("*")
+        .eq("tenant_id", tenantId)
+        .gt("updated_at", lastPull);
 
-    if (error) {
-      console.error(`Failed to pull ${table}:`, error);
-      continue;
-    }
-
-    if (data && data.length > 0) {
-      const tx = db.transaction(table, "readwrite");
-      for (const row of data) {
-        await tx.store.put(row);
+      if (error) {
+        console.error(`Failed to pull ${table}:`, error);
+        continue;
       }
-      await tx.done;
-    }
-  }
 
-  await db.put("meta", now, metaKey);
-  return { success: true };
+      if (data && data.length > 0) {
+        const tx = db.transaction(table, "readwrite");
+        for (const row of data) {
+          await tx.store.put(row);
+        }
+        await tx.done;
+      }
+    }
+
+    await db.put("meta", now, metaKey);
+    return { success: true };
+  } catch (err) {
+    console.error("pullSync error:", err);
+    return { success: false, reason: "network_error" };
+  }
 }
 
 /**
