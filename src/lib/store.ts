@@ -213,17 +213,19 @@ export async function bootstrap() {
       idb.getMeta<string>("lastSyncAt"),
     ]);
 
-    if (tenantId && user && business && user.tenant_id === tenantId) {
+    const targetTenantId = tenantId || user?.tenant_id || business?.id;
+
+    if (targetTenantId) {
       const [categories, products, groups, transactions, cart] = await Promise.all([
-        idb.allForTenant<Category>("categories", tenantId),
-        idb.allForTenant<Product>("products", tenantId),
-        idb.allForTenant<VariantGroup>("variant_groups", tenantId),
-        idb.allForTenant<Txn>("transactions", tenantId),
-        idb.getMeta<CartLine[]>(`cart:${tenantId}`),
+        idb.allForTenant<Category>("categories", targetTenantId),
+        idb.allForTenant<Product>("products", targetTenantId),
+        idb.allForTenant<VariantGroup>("variant_groups", targetTenantId),
+        idb.allForTenant<Txn>("transactions", targetTenantId),
+        idb.getMeta<CartLine[]>(`cart:${targetTenantId}`),
       ]);
       set({
-        user,
-        business,
+        user: user ?? state.user,
+        business: business ?? state.business,
         categories: categories.filter((c) => !c.deleted).sort((a, b) => a.sort_order - b.sort_order),
         products: products.filter((p) => !p.deleted).sort((a, b) => a.sort_order - b.sort_order),
         groups: groups.filter((g) => !g.deleted),
@@ -241,7 +243,7 @@ export async function bootstrap() {
         const nextUser = mapUser(me.user);
         const nextBusiness = mapBusiness(me.business);
         if (nextUser && nextBusiness) {
-          const activeTenantId = tenantId || state.business?.id;
+          const activeTenantId = targetTenantId || state.business?.id;
           if (activeTenantId && activeTenantId !== nextBusiness.id) {
             // A different workspace logged in on this device — wipe, then pull fresh.
             await idb.clearAllLocal();
@@ -253,11 +255,13 @@ export async function bootstrap() {
           await idb.setMeta("business", nextBusiness);
           await syncNow({ silent: true });
         }
+      } else if (state.user && !navigator.onLine) {
+        // Keep local state if offline
       } else if (state.user) {
         await signOutLocal();
       }
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) await signOutLocal();
+      if (err instanceof ApiError && err.status === 401 && navigator.onLine) await signOutLocal();
       // offline / unreachable: keep serving the local snapshot
     } finally {
       set({ ready: true });
@@ -381,7 +385,13 @@ export async function syncNow(opts: { silent?: boolean } = {}) {
 
       const serverTxns = (pull.transactions ?? []).map(mapTxn).filter((t) => t.id);
       const mergedTxns = new Map<string, Txn>();
-      for (const t of [...state.transactions, ...serverTxns]) mergedTxns.set(t.id, t.synced === 0 && !serverTxns.some((s) => s.id === t.id) ? t : { ...t, synced: 1 });
+      // Preserve all local transactions (especially unsynced ones or those created offline)
+      for (const t of state.transactions) mergedTxns.set(t.id, t);
+      for (const t of serverTxns) {
+        if (!mergedTxns.has(t.id) || mergedTxns.get(t.id)?.synced === 1) {
+          mergedTxns.set(t.id, { ...t, synced: 1 });
+        }
+      }
       const transactions = [...mergedTxns.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
 
       const business: Business = mapBusiness(pull.business) ??
