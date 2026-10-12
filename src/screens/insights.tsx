@@ -337,17 +337,22 @@ export function LaporanScreen() {
 
       <SectionTitle>Grafik omzet</SectionTitle>
       <Card className="p-3.5">
-        <div className="flex h-32 items-end gap-1.5">
-          {bucket.map(([label, value], i) => (
-            <div key={label + i} className="flex flex-1 flex-col items-center gap-1.5">
-              <span className="tabular text-[9.5px] font-bold text-muted">{value > 0 ? `${Math.round(value / 1000)}rb` : ""}</span>
-              <div
-                className="w-full rounded-t-md bg-gradient-to-t from-chili-deep to-chili transition-[height] duration-500"
-                style={{ height: `${Math.max(2, Math.round((value / max) * 92))}%`, animationDelay: `${i * 40}ms` }}
-              />
-              <span className="truncate text-[9.5px] font-bold text-muted">{label}</span>
-            </div>
-          ))}
+        <div className="flex h-36 items-end gap-2 pt-4">
+          {bucket.map(([label, value], i) => {
+            const heightPct = Math.max(8, Math.round((value / max) * 100));
+            return (
+              <div key={label + i} className="flex flex-1 flex-col items-center gap-1 h-full justify-end">
+                <span className="tabular text-[10px] font-bold text-muted">{value > 0 ? `${Math.round(value / 1000)}k` : ""}</span>
+                <div className="w-full relative flex items-end justify-center" style={{ height: '96px' }}>
+                  <div
+                    className="w-full rounded-t-lg bg-gradient-to-t from-orange-600 to-orange-400 transition-all duration-500 shadow-sm"
+                    style={{ height: `${heightPct}%`, animationDelay: `${i * 40}ms` }}
+                  />
+                </div>
+                <span className="truncate text-[10px] font-bold text-muted mt-1">{label}</span>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
