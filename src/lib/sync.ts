@@ -113,7 +113,7 @@ export async function pullSync(tenantId: string) {
   try {
     const db = await getLocalDB();
     const metaKey = `last_pull_${tenantId}`;
-    const lastPull = (await db.get("meta", metaKey)) || new Date(0).toISOString();
+    const lastPull = (await db.get("meta", metaKey)) || new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const now = new Date().toISOString();
 
     const tables = ["categories", "products", "variant_groups", "transactions"];
@@ -158,12 +158,14 @@ export async function pullSync(tenantId: string) {
  * Run full bidirectional sync sequence.
  */
 export async function syncAll(tenantId: string) {
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return { success: false, reason: "offline" };
   try {
-    await pushSync(tenantId);
-    await pullSync(tenantId);
+    const pushRes = await pushSync(tenantId);
+    const pullRes = await pullSync(tenantId);
+    return { success: true, push: pushRes, pull: pullRes };
   } catch (err) {
     console.error("Sync error:", err);
+    return { success: false, reason: "error", error: err };
   }
 }
 
