@@ -119,11 +119,14 @@ export async function pullSync(tenantId: string) {
     const tables = ["categories", "products", "variant_groups", "transactions"];
 
     for (const table of tables) {
+      // Transactions use created_at, other catalog tables use updated_at
+      const timeCol = table === "transactions" ? "created_at" : "updated_at";
+
       const { data, error } = await supabase
         .from(table)
         .select("*")
         .eq("tenant_id", tenantId)
-        .gt("updated_at", lastPull);
+        .gt(timeCol, lastPull);
 
       if (error) {
         console.error(`Failed to pull ${table}:`, error);
@@ -133,6 +136,10 @@ export async function pullSync(tenantId: string) {
       if (data && data.length > 0) {
         const tx = db.transaction(table, "readwrite");
         for (const row of data) {
+          // Ensure pulled transactions are marked as synced locally
+          if (table === "transactions") {
+            (row as any).synced = true;
+          }
           await tx.store.put(row);
         }
         await tx.done;
@@ -165,6 +172,9 @@ export async function syncAll(tenantId: string) {
  */
 export function initAutoSync(tenantId: string) {
   if (typeof window === "undefined") return;
+
+  // Run an initial sync immediately when initialized/mounted
+  syncAll(tenantId).catch(() => {});
 
   const handleVisibilityChange = () => {
     if (document.visibilityState === "hidden") {
