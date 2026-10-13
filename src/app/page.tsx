@@ -10,6 +10,15 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
+
+    const handleOnline = () => {
+      window.dispatchEvent(new Event("app-online"));
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+    };
   }, []);
 
   if (!mounted) {
