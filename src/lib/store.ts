@@ -145,7 +145,7 @@ function mapProduct(raw: AnyRecord): Product {
     glyph: (raw.glyph as string) ?? null,
     is_active: raw.is_active !== false && raw.isActive !== false,
     sort_order: num(raw.sort_order ?? raw.sortOrder),
-    deleted: Boolean(raw.deleted),
+    deleted: Boolean(raw.deleted || raw.deleted_at || raw.deletedAt),
     dirty: num(raw.dirty, 0) as 0 | 1,
     updated_at: str(raw.updated_at ?? raw.updatedAt) || undefined,
   };
@@ -226,9 +226,9 @@ export async function bootstrap() {
       set({
         user: user ?? state.user,
         business: business ?? state.business,
-        categories: categories.filter((c) => !c.deleted).sort((a, b) => a.sort_order - b.sort_order),
-        products: products.filter((p) => !p.deleted).sort((a, b) => a.sort_order - b.sort_order),
-        groups: groups.filter((g) => !g.deleted),
+        categories: categories.sort((a, b) => a.sort_order - b.sort_order),
+        products: products.sort((a, b) => a.sort_order - b.sort_order),
+        groups: groups,
         transactions: transactions.sort((a, b) => b.created_at.localeCompare(a.created_at)),
         cart: Array.isArray(cart) ? cart : [],
         lastSyncAt,
@@ -407,8 +407,8 @@ export async function syncNow(opts: { silent?: boolean } = {}) {
         };
       set({
         business,
-        categories: (incomingCats as unknown as Category[]).sort((a, b) => a.sort_order - b.sort_order),
-        products: mergedProducts.sort((a, b) => a.sort_order - b.sort_order),
+        categories: incomingCats,
+        products: mergedProducts,
         groups: mergedGroups,
         transactions,
         syncing: false,
@@ -626,9 +626,14 @@ export async function saveProduct(draft: ProductDraft) {
 }
 
 export async function deleteProduct(id: string) {
-  const product: Product = { ...(state.products.find((p) => p.id === id) as Product), deleted: true, dirty: 1 };
+  const target = state.products.find((p) => p.id === id);
+  if (!target) return;
+  const product: Product = { ...target, deleted: true, dirty: 1, updated_at: new Date().toISOString() };
   const groups = state.groups.filter((g) => g.product_id === id).map((g) => ({ ...g, deleted: true, dirty: 1 as const }));
-  set({ products: state.products.filter((p) => p.id !== id), groups: [...state.groups.filter((g) => g.product_id !== id), ...groups] });
+  set({
+    products: state.products.map((p) => (p.id === id ? product : p)),
+    groups: state.groups.map((g) => (g.product_id === id ? { ...g, deleted: true, dirty: 1 as const } : g)),
+  });
   await idb.putRecord("products", product as unknown as AnyRecord);
   await idb.putMany("variant_groups", groups as unknown as AnyRecord[]);
   queueSync(200);
@@ -660,10 +665,14 @@ export async function saveCategory(input: { id?: string; name: string; emoji?: s
 }
 
 export async function deleteCategory(id: string) {
+  const target = state.categories.find((c) => c.id === id);
+  if (!target) return;
+  const category = { ...target, deleted: true, dirty: 1 as const };
   set({
-    categories: state.categories.filter((c) => c.id !== id),
+    categories: state.categories.map((c) => (c.id === id ? category : c)),
     products: state.products.map((p) => (p.category_id === id ? { ...p, category_id: null, dirty: 1 as const } : p)),
   });
+  await idb.putRecord("categories", category as unknown as AnyRecord);
   await persistCatalog();
   queueSync(300);
 }
