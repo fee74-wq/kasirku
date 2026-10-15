@@ -104,4 +104,4 @@ This project was built with AI-assisted tooling (code generation and an AI pair-
 
 ## License
 
-MIT (add a `LICENSE` file if you keep this).
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more information.
