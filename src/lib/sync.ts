@@ -184,12 +184,18 @@ export function initAutoSync(tenantId: string) {
     }
   };
 
+  const handleOnline = () => {
+    syncAll(tenantId).catch(() => {});
+  };
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("online", handleOnline);
   window.addEventListener("beforeunload", () => {
     pushSync(tenantId).catch(() => {});
   });
 
   return () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("online", handleOnline);
   };
 }
