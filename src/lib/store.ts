@@ -123,7 +123,7 @@ function mapGroup(raw: AnyRecord): VariantGroup {
     multiple: Boolean(raw.multiple),
     required: raw.required !== false,
     sort_order: num(raw.sort_order ?? raw.sortOrder),
-    dirty: 0,
+    dirty: num(raw.dirty, 0) as 0 | 1,
     options: list.map<VariantOption>((v) => ({
       id: str(v.id),
       name: str(v.name),
@@ -178,12 +178,14 @@ function mapTxn(raw: AnyRecord): Txn {
 async function persistCatalog() {
   const tenantId = state.business?.id;
   if (!tenantId) return;
+  console.log("[IDB] Persisting catalog for tenant:", tenantId);
   await idb.putMany("categories", state.categories as unknown as AnyRecord[]);
   await idb.putMany("products", state.products as unknown as AnyRecord[]);
   await idb.putMany("variant_groups", state.groups as unknown as AnyRecord[]);
 }
 
 async function saveTxn(txn: Txn) {
+  console.log("[IDB] Saving transaction locally:", txn.id);
   await idb.putRecord("transactions", txn as unknown as AnyRecord);
 }
 
@@ -206,6 +208,7 @@ export async function bootstrap() {
     if (bootstrapped && state.business?.id) return;
     bootstrapped = true;
 
+    console.log("[Bootstrap] Loading initial state from IndexedDB...");
     const [tenantId, user, business, lastSyncAt] = await Promise.all([
       idb.getMeta<string>("activeTenant"),
       idb.getMeta<TenantUser>("user"),
@@ -213,9 +216,10 @@ export async function bootstrap() {
       idb.getMeta<string>("lastSyncAt"),
     ]);
 
-    const targetTenantId = tenantId || user?.tenant_id || business?.id;
+    let targetTenantId = tenantId || user?.tenant_id || business?.id;
 
     if (targetTenantId) {
+      console.log("[Bootstrap] Found targetTenantId in IDB:", targetTenantId);
       const [categories, products, groups, transactions, cart] = await Promise.all([
         idb.allForTenant<Category>("categories", targetTenantId),
         idb.allForTenant<Product>("products", targetTenantId),
@@ -223,6 +227,7 @@ export async function bootstrap() {
         idb.allForTenant<Txn>("transactions", targetTenantId),
         idb.getMeta<CartLine[]>(`cart:${targetTenantId}`),
       ]);
+      console.log(`[Bootstrap] Loaded from IDB -> categories: ${categories.length}, products: ${products.length}, txns: ${transactions.length}`);
       set({
         user: user ?? state.user,
         business: business ?? state.business,
@@ -238,14 +243,15 @@ export async function bootstrap() {
 
     // Revalidate the session against the server, then sync if we can.
     try {
+      console.log("[Bootstrap] Revalidating session with server (/api/auth/me)...");
       const me = await api<{ signed_in?: boolean; user?: AnyRecord; business?: AnyRecord }>("/api/auth/me");
       if (me.signed_in) {
         const nextUser = mapUser(me.user);
         const nextBusiness = mapBusiness(me.business);
         if (nextUser && nextBusiness) {
-          const activeTenantId = targetTenantId || state.business?.id;
-          if (activeTenantId && activeTenantId !== nextBusiness.id) {
-            // A different workspace logged in on this device — wipe, then pull fresh.
+          const activeTenantId = targetTenantId || nextBusiness.id;
+          if (targetTenantId && targetTenantId !== nextBusiness.id) {
+            console.log("[Bootstrap] Workspace changed, clearing local cache...");
             await idb.clearAllLocal();
             set({ categories: [], products: [], groups: [], transactions: [], cart: [] });
           }
@@ -253,7 +259,26 @@ export async function bootstrap() {
           await idb.setMeta("activeTenant", nextBusiness.id);
           await idb.setMeta("user", nextUser);
           await idb.setMeta("business", nextBusiness);
-          await syncNow({ silent: true });
+
+          // If IDB was empty earlier, load for the new active tenant now
+          if (!targetTenantId) {
+            const [categories, products, groups, transactions, cart] = await Promise.all([
+              idb.allForTenant<Category>("categories", nextBusiness.id),
+              idb.allForTenant<Product>("products", nextBusiness.id),
+              idb.allForTenant<VariantGroup>("variant_groups", nextBusiness.id),
+              idb.allForTenant<Txn>("transactions", nextBusiness.id),
+              idb.getMeta<CartLine[]>(`cart:${nextBusiness.id}`),
+            ]);
+            set({
+              categories: categories.sort((a, b) => a.sort_order - b.sort_order),
+              products: products.sort((a, b) => a.sort_order - b.sort_order),
+              groups: groups,
+              transactions: transactions.sort((a, b) => b.created_at.localeCompare(a.created_at)),
+              cart: Array.isArray(cart) ? cart : [],
+            });
+          }
+
+          void syncNow({ silent: true });
         }
       } else if (state.user && !navigator.onLine) {
         // Keep local state if offline
@@ -261,6 +286,7 @@ export async function bootstrap() {
         await signOutLocal();
       }
     } catch (err) {
+      console.warn("[Bootstrap] Session revalidation failed or offline:", err);
       if (err instanceof ApiError && err.status === 401 && navigator.onLine) await signOutLocal();
       // offline / unreachable: keep serving the local snapshot
     } finally {
@@ -268,15 +294,24 @@ export async function bootstrap() {
     }
 
     window.addEventListener("online", () => {
+      console.log("[Network] App came online");
       set({ online: true });
       void syncNow({ silent: true });
     });
-    window.addEventListener("offline", () => set({ online: false }));
+    window.addEventListener("offline", () => {
+      console.log("[Network] App went offline");
+      set({ online: false });
+    });
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && navigator.onLine) void syncNow({ silent: true });
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        console.log("[Visibility] App visible & online, triggering sync...");
+        void syncNow({ silent: true });
+      }
     });
     window.setInterval(() => {
-      if (navigator.onLine && state.business) void syncNow({ silent: true });
+      if (navigator.onLine && state.business) {
+        void syncNow({ silent: true });
+      }
     }, 60_000);
   })();
   return bootstrapPromise;
@@ -366,10 +401,15 @@ export async function syncNow(opts: { silent?: boolean } = {}) {
     }
     set({ syncing: true });
     try {
+      console.log("[Sync] Starting sync process...");
       const payload = collectDirty();
-      if (payload) await api("/api/sync/push", { method: "POST", body: JSON.stringify(payload) });
+      if (payload) {
+        console.log("[Sync] Pushing dirty records to server...", payload);
+        await api("/api/sync/push", { method: "POST", body: JSON.stringify(payload) });
+      }
 
       const since = await idb.getMeta<string>(`since:${tenantId}`);
+      console.log("[Sync] Pulling from server since:", since);
       const pull = await api<PullResponse>(`/api/sync/pull${since ? `?since=${encodeURIComponent(since)}` : ""}`);
 
       const incomingProducts = (pull.products ?? []).map(mapProduct);
@@ -405,6 +445,17 @@ export async function syncNow(opts: { silent?: boolean } = {}) {
           receipt_footer: null,
           subscription_tier: "free",
         };
+
+      // FIRST: persist everything to IDB and ensure writes complete successfully
+      await idb.setMeta(`since:${tenantId}`, pull.server_time ?? new Date().toISOString());
+      await idb.setMeta("lastSyncAt", pull.server_time ?? new Date().toISOString());
+      await idb.setMeta("business", business);
+      await persistCatalog();
+      for (const t of transactions.slice(0, 800)) {
+        await idb.putRecord("transactions", t as unknown as AnyRecord);
+      }
+
+      // SECOND: update in-memory state
       set({
         business,
         categories: incomingCats,
@@ -424,14 +475,11 @@ export async function syncNow(opts: { silent?: boolean } = {}) {
         });
       }
 
-      await idb.setMeta(`since:${tenantId}`, pull.server_time ?? new Date().toISOString());
-      await idb.setMeta("lastSyncAt", pull.server_time ?? new Date().toISOString());
-      await idb.setMeta("business", business);
-      await persistCatalog();
-      for (const t of transactions.slice(0, 800)) await idb.putRecord("transactions", t as unknown as AnyRecord);
+      console.log("[Sync] Sync completed successfully.");
       if (!opts.silent) toast("Data tersinkron ke server ☁️", "ok");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "Belum bisa sinkron. Data tetap aman di HP.";
+      console.error("[Sync] Sync error:", err);
       set({ syncing: false, syncError: msg });
       if (!opts.silent) toast(msg, "err");
     } finally {
@@ -778,10 +826,14 @@ export async function checkout(input: { cash: number; method: PaymentMethod }) {
     dirty: 1,
   };
 
-  // Synchronously update state and clear cart so UI updates instantly, persist & save in background
+  // 1. Immediately save to IndexedDB first so persistence is guaranteed
+  await saveTxn(txn);
+
+  // 2. Update state and clear cart
   set({ transactions: [txn, ...state.transactions], lastTxn: txn, cart: [], discount: 0 });
   persistCart();
-  void saveTxn(txn).catch((err) => console.error("Failed to save txn locally", err));
+
+  // 3. Trigger queue sync
   queueSync(150);
   return txn;
 }
